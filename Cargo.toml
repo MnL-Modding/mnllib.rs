@@ -1,0 +1,12 @@
+[package]
+name = "mnllib"
+version = "0.1.0"
+authors = ["Dimitar Dimitrov <dmtrdmtrov@gmail.com>"]
+edition = "2021"
+description = "Rust library for the Mario & Luigi games"
+license = "MPL-2.0"
+
+[dependencies]
+byteorder = "1.5.0"
+num_enum = "0.7.3"
+thiserror = "1.0.64"
