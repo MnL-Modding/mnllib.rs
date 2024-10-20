@@ -136,7 +136,7 @@ where
 
                 let mut lz77_best_length = 0u8;
                 let mut lz77_best_offset = 0u16;
-                for offset in (1..=min(current_uncompressed_position, 0xFFF) as u16).rev() {
+                for offset in (2..=min(current_uncompressed_position, 0xFFF) as u16).rev() {
                     let mut current_length = 0u8;
                     while current_length < 17
                         && u16::from(current_length) < offset
