@@ -73,9 +73,9 @@ where
                         dst.write_all(&data_to_copy)?;
                     }
                     CompressionCommand::Rle => {
-                        let count = src.read_u8()? + 2;
+                        let count = usize::from(src.read_u8()?) + 2;
                         let data = src.read_u8()?;
-                        dst.write_all(&vec![data; count.into()])?;
+                        dst.write_all(&vec![data; count])?;
                     }
                 }
                 commands_byte >>= 2;
