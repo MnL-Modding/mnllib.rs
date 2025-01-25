@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::misc::{VarInt, VarIntReader};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum CompressionCommand {
     EndBlock = 0,
