@@ -1,7 +1,6 @@
 [package]
 name = "mnllib"
 version = "0.1.0"
-authors = ["Dimitar Dimitrov <dmtrdmtrov@gmail.com>"]
 edition = "2021"
 description = "Rust library for the Mario & Luigi games"
 repository = "https://github.com/MnL-Modding/mnllib.rs"
