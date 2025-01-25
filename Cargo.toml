@@ -6,6 +6,7 @@ description = "Rust library for the Mario & Luigi games"
 repository = "https://github.com/MnL-Modding/mnllib.rs"
 license = "MPL-2.0"
 keywords = ["mnl"]
+exclude = ["/tests/data"]
 
 [dependencies]
 bitfield-struct = "0.10.0"
