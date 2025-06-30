@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{self, Cursor, Read, Seek, SeekFrom, Write},
     num::TryFromIntError,
 };
@@ -17,16 +17,16 @@ use thiserror::Error;
 use crate::{
     compress,
     consts::{
-        BATTLE_MAP_WIDTH, BATTLE_TILESET_PIXEL_SIZE, FIELD_MAP_CHUNK_TABLE_ADDRESS,
-        FMAPDATA_OFFSET_TABLE_LENGTH_ADDRESS, NUMBER_OF_FIELD_MAPS,
+        fs_std_data_path, fs_std_overlay_path, BATTLE_MAP_WIDTH, BATTLE_TILESET_PIXEL_FORMAT,
+        FIELD_MAP_CHUNK_TABLE_ADDRESS, FMAPDATA_OFFSET_TABLE_LENGTH_ADDRESS, NUMBER_OF_FIELD_MAPS,
         STANDARD_DATA_WITH_OFFSET_TABLE_ALIGNMENT, STANDARD_FILE_ALIGNMENT, TILE_AREA,
         TREASURE_INFO_OFFSET_TABLE_LENGTH_ADDRESS,
     },
     decompress,
     misc::{
-        filesystem_standard_data_path, filesystem_standard_overlay_path, DataWithOffsetTable,
-        DataWithOffsetTableDeserializationError, DataWithOffsetTableSerializationError,
-        MaybeCompressedData, MaybeSerialized, Palette, PaletteDeserializationError, Rgb555,
+        Bgr555, DataWithOffsetTable, DataWithOffsetTableDeserializationError,
+        DataWithOffsetTableSerializationError, MaybeCompressedData, MaybeSerialized, Palette,
+        PaletteDeserializationError,
     },
     utils::{
         empty_if_none, necessary_padding_for, none_if_empty, option_to_u32_or_max_try_into,
@@ -37,17 +37,17 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
-pub enum PixelSize {
-    Nibble = 0,
-    Byte = 1,
+pub enum PixelFormat {
+    FourBitsPerPixel = 0,
+    EightBitsPerPixel = 1,
 }
 
-impl PixelSize {
+impl PixelFormat {
     // For `bitfield_struct`.
     const fn from_bits(value: u8) -> Self {
         match value {
-            0 => Self::Nibble,
-            _ => Self::Byte, // Hack which works if you always use `#[bits(1)]`.
+            0 => Self::FourBitsPerPixel,
+            _ => Self::EightBitsPerPixel, // Hack which works if you always use `#[bits(1)]`.
         }
     }
     const fn into_bits(self) -> u8 {
@@ -75,8 +75,8 @@ pub enum TilesetTileDeserializationError {
 }
 #[derive(Error, Debug)]
 pub enum TilesetTileSerializationError {
-    #[error("a pixel's value is too large to fit in {pixel_size:?}")]
-    PixelValueTooLarge { pixel_size: PixelSize },
+    #[error("a pixel's value is too large to fit in {pixel_format:?}")]
+    PixelValueTooLarge { pixel_format: PixelFormat },
 }
 #[derive(Error, Debug)]
 pub enum TilesetTileFromColorsError {
@@ -89,16 +89,16 @@ pub enum TilesetTileFromColorsError {
 impl TilesetTile {
     pub fn from_bytes(
         data: &[u8],
-        pixel_size: PixelSize,
+        pixel_format: PixelFormat,
     ) -> Result<Self, TilesetTileDeserializationError> {
-        Ok(Self(match pixel_size {
-            PixelSize::Nibble => data
+        Ok(Self(match pixel_format {
+            PixelFormat::FourBitsPerPixel => data
                 .iter()
                 .flat_map(|x| [x & 0x0F, x >> 4])
                 .collect::<Vec<_>>()
                 .try_into()
                 .or(Err(TilesetTileDeserializationError::InvalidInputLength))?,
-            PixelSize::Byte => data
+            PixelFormat::EightBitsPerPixel => data
                 .try_into()
                 .or(Err(TilesetTileDeserializationError::InvalidInputLength))?,
         }))
@@ -106,35 +106,35 @@ impl TilesetTile {
 
     pub fn to_bytes(
         &self,
-        pixel_size: PixelSize,
+        pixel_format: PixelFormat,
     ) -> Result<Vec<u8>, TilesetTileSerializationError> {
-        Ok(match pixel_size {
-            PixelSize::Nibble => self
+        Ok(match pixel_format {
+            PixelFormat::FourBitsPerPixel => self
                 .0
                 .chunks_exact(2)
                 .map(|pixels| {
                     if pixels[0] > 0x0F || pixels[1] > 0x0F {
                         return Err(TilesetTileSerializationError::PixelValueTooLarge {
-                            pixel_size,
+                            pixel_format,
                         });
                     }
                     Ok(pixels[0] | (pixels[1] << 4))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            PixelSize::Byte => self.0.to_vec(),
+            PixelFormat::EightBitsPerPixel => self.0.to_vec(),
         })
     }
 
     #[inline]
-    pub fn as_rgb555(&self, palette: &Palette) -> [Rgb555; TILE_AREA] {
-        self.as_rgb555_with_offset(palette, 0)
+    pub fn as_bgr555(&self, palette: &Palette) -> [Bgr555; TILE_AREA] {
+        self.as_bgr555_with_offset(palette, 0)
     }
     #[inline]
-    pub fn as_rgb555_with_offset(
+    pub fn as_bgr555_with_offset(
         &self,
         palette: &Palette,
         palette_offset: usize,
-    ) -> [Rgb555; TILE_AREA] {
+    ) -> [Bgr555; TILE_AREA] {
         self.0.map(|x| palette.0[usize::from(x) + palette_offset])
     }
     #[inline]
@@ -148,12 +148,12 @@ impl TilesetTile {
         palette_offset: usize,
     ) -> [Rgba<u8>; TILE_AREA] {
         self.0
-            .map(|x| palette.color_as_rgba8888(usize::from(x) + palette_offset))
+            .map(|x| palette.color_as_rgba8888_with_offset(x.into(), palette_offset))
     }
 
     #[inline]
-    pub fn from_rgb555_or_transparent(
-        colors: &[Option<Rgb555>; TILE_AREA],
+    pub fn from_bgr555_or_transparent(
+        colors: &[Option<Bgr555>; TILE_AREA],
         palette: &Palette,
     ) -> Result<Self, TilesetTileFromColorsError> {
         // UNSTABLE: Use `array::try_map`.
@@ -162,13 +162,14 @@ impl TilesetTile {
                 .iter()
                 .map(|color| -> Result<_, TilesetTileFromColorsError> {
                     Ok(if let Some(color) = color {
-                        palette
+                        (palette
                             .0
                             .iter()
                             .skip(1)
                             .position(|x| x == color)
                             .ok_or(TilesetTileFromColorsError::ColorNotInPalette)?
-                            .try_into()?
+                            + 1)
+                        .try_into()?
                     } else {
                         0
                     })
@@ -182,7 +183,7 @@ impl TilesetTile {
         colors: &[Rgba<u8>; TILE_AREA],
         palette: &Palette,
     ) -> Result<Self, TilesetTileFromColorsError> {
-        Self::from_rgb555_or_transparent(
+        Self::from_bgr555_or_transparent(
             &colors.map(|color| {
                 if color.a == 0 {
                     None
@@ -201,25 +202,25 @@ pub struct Tileset(pub Vec<TilesetTile>);
 impl Tileset {
     pub fn from_bytes(
         data: &[u8],
-        pixel_size: PixelSize,
+        pixel_format: PixelFormat,
     ) -> Result<Self, TilesetTileDeserializationError> {
         Ok(Self(
-            data.chunks(match pixel_size {
-                PixelSize::Nibble => TILE_AREA / 2,
-                PixelSize::Byte => TILE_AREA,
+            data.chunks(match pixel_format {
+                PixelFormat::FourBitsPerPixel => TILE_AREA / 2,
+                PixelFormat::EightBitsPerPixel => TILE_AREA,
             })
-            .map(|d| TilesetTile::from_bytes(d, pixel_size))
+            .map(|d| TilesetTile::from_bytes(d, pixel_format))
             .collect::<Result<Vec<_>, _>>()?,
         ))
     }
 
     pub fn to_bytes(
         &self,
-        pixel_size: PixelSize,
+        pixel_format: PixelFormat,
     ) -> Result<Vec<u8>, TilesetTileSerializationError> {
         self.0
             .iter()
-            .map(|x| x.to_bytes(pixel_size))
+            .map(|x| x.to_bytes(pixel_format))
             .flatten_ok()
             .collect()
     }
@@ -261,8 +262,8 @@ impl TileLayer {
 #[bitfield(u8)]
 #[derive(PartialEq, Eq, Hash)]
 pub struct TilesetsProperties {
-    #[bits(3, from = PixelSize::array3_from_bits, into = PixelSize::array3_into_bits)]
-    pub tileset_pixel_sizes: [PixelSize; 3],
+    #[bits(3, from = PixelFormat::array3_from_bits, into = PixelFormat::array3_into_bits)]
+    pub tileset_pixel_formats: [PixelFormat; 3],
     #[bits(5)]
     pub unk: u8,
 }
@@ -609,23 +610,22 @@ impl FieldMaps {
         Ok(())
     }
 
-    pub fn load_from_filesystem_standard() -> Result<Self, FieldMapsFromFilesError> {
+    pub fn load_from_fs_std() -> Result<Self, FieldMapsFromFilesError> {
         Self::from_files(
-            File::open(filesystem_standard_data_path("FMap/FMapData.dat"))?,
-            File::open(filesystem_standard_data_path("Treasure/TreasureInfo.dat"))?,
-            File::open(filesystem_standard_overlay_path(3))?,
-            File::open(filesystem_standard_overlay_path(4))?,
+            File::open(fs_std_data_path("FMap/FMapData.dat"))?,
+            File::open(fs_std_data_path("Treasure/TreasureInfo.dat"))?,
+            File::open(fs_std_overlay_path(3))?,
+            File::open(fs_std_overlay_path(4))?,
         )
     }
-    pub fn save_to_filesystem_standard(
-        &self,
-        align_files: bool,
-    ) -> Result<(), FieldMapsToFilesError> {
+    pub fn save_to_fs_std(&self, align_files: bool) -> Result<(), FieldMapsToFilesError> {
+        let mut overlay_options = OpenOptions::new();
+        overlay_options.write(true);
         self.to_files(
-            File::open(filesystem_standard_data_path("FMap/FMapData.dat"))?,
-            File::open(filesystem_standard_data_path("Treasure/TreasureInfo.dat"))?,
-            File::open(filesystem_standard_overlay_path(3))?,
-            File::open(filesystem_standard_overlay_path(4))?,
+            File::create(fs_std_data_path("FMap/FMapData.dat"))?,
+            File::create(fs_std_data_path("Treasure/TreasureInfo.dat"))?,
+            overlay_options.open(fs_std_overlay_path(3))?,
+            overlay_options.open(fs_std_overlay_path(4))?,
             align_files,
         )
     }
@@ -666,12 +666,12 @@ impl BattleMap {
         decompress(Cursor::new(data), &mut buf, false)?;
         let mut buf = buf.into_inner();
         buf.align_to_elements(TILE_AREA / 2);
-        Ok(Tileset::from_bytes(&buf, BATTLE_TILESET_PIXEL_SIZE)?)
+        Ok(Tileset::from_bytes(&buf, BATTLE_TILESET_PIXEL_FORMAT)?)
     }
     pub fn serialize_tileset(
         tileset: &Tileset,
     ) -> Result<Vec<u8>, BattleMapTilesetSerializationError> {
-        let uncompressed = tileset.to_bytes(BATTLE_TILESET_PIXEL_SIZE)?;
+        let uncompressed = tileset.to_bytes(BATTLE_TILESET_PIXEL_FORMAT)?;
         let last_non_zero = uncompressed
             .iter()
             .rposition(|&x| x != 0)

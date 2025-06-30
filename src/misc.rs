@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    fmt::Display,
     io::{self, Cursor, Read, Write},
     num::TryFromIntError,
 };
@@ -12,13 +11,6 @@ use rgb::{Rgb, Rgba};
 use thiserror::Error;
 
 use crate::{compress, decompress, utils::AlignToElements, CompressionError, DecompressionError};
-
-pub fn filesystem_standard_data_path(filename: impl Display) -> String {
-    format!("data/data/{}", filename)
-}
-pub fn filesystem_standard_overlay_path(overlay_number: impl Display) -> String {
-    format!("data/overlay.dec/overlay_{:04}.dec.bin", overlay_number)
-}
 
 pub trait VarIntReader {
     fn read_varint(&mut self) -> io::Result<u32>;
@@ -215,7 +207,7 @@ impl DataWithOffsetTable {
 
 #[bitfield(u16, new = false, repr = le16, from = le16::from_ne, into = le16::to_ne)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Rgb555 {
+pub struct Bgr555 {
     #[bits(5)]
     pub r: u8,
     #[bits(5)]
@@ -225,7 +217,7 @@ pub struct Rgb555 {
     __: bool, // Padding
 }
 
-impl Rgb555 {
+impl Bgr555 {
     pub fn new(r: u8, g: u8, b: u8) -> Self {
         Self::default().with_r(r).with_g(g).with_b(b)
     }
@@ -237,21 +229,21 @@ impl Rgb555 {
             .with_b_checked(b)
     }
 }
-impl From<Rgb<u8>> for Rgb555 {
+impl From<Rgb<u8>> for Bgr555 {
     #[inline]
     fn from(value: Rgb<u8>) -> Self {
         Self::new(value.r >> 3, value.g >> 3, value.b >> 3)
     }
 }
-impl From<Rgb555> for Rgb<u8> {
+impl From<Bgr555> for Rgb<u8> {
     #[inline]
-    fn from(value: Rgb555) -> Self {
+    fn from(value: Bgr555) -> Self {
         Self::new(value.r() << 3, value.g() << 3, value.b() << 3)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Palette(pub Vec<Rgb555>);
+pub struct Palette(pub Vec<Bgr555>);
 
 #[derive(Error, Debug)]
 pub enum PaletteDeserializationError {
@@ -281,6 +273,14 @@ impl Palette {
 
     #[inline]
     pub fn color_as_rgba8888(&self, index: usize) -> Rgba<u8> {
-        <Rgb<u8>>::from(self.0[index]).with_alpha(if index == 0 { 0x00 } else { 0xFF })
+        self.color_as_rgba8888_with_offset(index, 0)
+    }
+    #[inline]
+    pub fn color_as_rgba8888_with_offset(&self, index: usize, offset: usize) -> Rgba<u8> {
+        <Rgb<u8>>::from(self.0[(offset + index) % self.0.len()]).with_alpha(if index == 0 {
+            0x00
+        } else {
+            0xFF
+        })
     }
 }

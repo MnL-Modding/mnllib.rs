@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 pub mod compression;
 pub mod consts;
 pub mod map;

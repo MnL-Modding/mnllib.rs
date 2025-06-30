@@ -1,17 +1,14 @@
 use std::{
     fmt::{Debug, Display},
-    fs::{self},
+    fs,
     io::{Cursor, Write},
     path::{Path, PathBuf},
 };
 
 use mnllib::{
-    consts::STANDARD_DATA_WITH_OFFSET_TABLE_ALIGNMENT,
+    consts::{fs_std_data_path, fs_std_overlay_path, STANDARD_DATA_WITH_OFFSET_TABLE_ALIGNMENT},
     map::{BattleMap, BattleMapFile, FieldMapChunk, FieldMaps, Tileset},
-    misc::{
-        filesystem_standard_data_path, filesystem_standard_overlay_path, DataWithOffsetTable,
-        MaybeCompressedData, MaybeSerialized,
-    },
+    misc::{DataWithOffsetTable, MaybeCompressedData, MaybeSerialized},
 };
 use rstest::rstest;
 
@@ -19,10 +16,10 @@ fn test_path(path: impl AsRef<Path>) -> PathBuf {
     Path::new("tests").join(path)
 }
 fn test_fs_data_path(filename: impl Display) -> PathBuf {
-    test_path(filesystem_standard_data_path(filename))
+    test_path(fs_std_data_path(filename))
 }
-fn test_fs_overlay_path(overlay_number: impl Display) -> PathBuf {
-    test_path(filesystem_standard_overlay_path(overlay_number))
+fn test_fs_overlay_path(overlay_id: impl Display) -> PathBuf {
+    test_path(fs_std_overlay_path(overlay_id))
 }
 
 fn rebuild_through_data_with_offset_table<T>(original_data: &[u8], new_data: impl Write)
@@ -123,19 +120,19 @@ fn rebuild_field_maps_full() {
         .unwrap();
         for (i, &tileset_index) in map.tileset_indexes.iter().enumerate() {
             if let Some(tileset_index) = tileset_index {
-                let pixel_size = map_chunk
+                let pixel_format = map_chunk
                     .properties
                     .tilesets_properties
-                    .tileset_pixel_sizes()[i];
+                    .tileset_pixel_formats()[i];
                 field_maps.fmapdata_chunks[tileset_index] = MaybeCompressedData::Uncompressed(
                     Tileset::from_bytes(
                         &field_maps.fmapdata_chunks[tileset_index]
                             .to_uncompressed(true)
                             .unwrap(),
-                        pixel_size,
+                        pixel_format,
                     )
                     .unwrap()
-                    .to_bytes(pixel_size)
+                    .to_bytes(pixel_format)
                     .unwrap(),
                 );
             }
